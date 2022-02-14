@@ -3,3 +3,7 @@ pve/0002-bridge-keep-MAC-of-first-assigned-port.patch
 pve/0003-pci-Enable-overrides-for-missing-ACS-capabilities-4..patch
 pve/0004-kvm-disable-default-dynamic-halt-polling-growth.patch
 pve/0005-net-core-downgrade-unregister_netdevice-refcount-lea.patch
+aufs/0001-aufs5-kbuild.patch
+aufs/0002-aufs5-base.patch
+aufs/0003-aufs5-mmap.patch
+aufs/0004-aufs5-standalone.patch

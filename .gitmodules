@@ -5,3 +5,9 @@
 [submodule "linux"]
 	path = linux
 	url = git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+[submodule "aufs5-standalone"]
+	path = aufs5-standalone
+	url = ./aufs5-standalone
+[submodule "aufs-util"]
+	path = aufs-util
+	url = ./aufs-util

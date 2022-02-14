@@ -11,6 +11,8 @@ include debian/rules.d/arch/${DEB_BUILD_ARCH}.mk
 BUILD_DIR ?= ${CURDIR}
 KERNEL_SRC := linux
 ZFS_SRC := zfs
+AUFS_SRC := aufs5-standalone
+AUFS_TOOLS_SRC := aufs-util
 
 %:
 	dh $@ --with quilt
@@ -26,18 +28,19 @@ debian/SOURCE:
 
 ## Debhelper phases
 override_dh_quilt_patch:
-	# Apply crack bundle
+        # Apply crack bundle
 	git -C ${KERNEL_SRC} fetch ../crack.bundle $$(git -C ${KERNEL_SRC} ls-remote ../crack.bundle | cut -f1)
 	git -C ${KERNEL_SRC} checkout -f FETCH_HEAD
-	# Apply patches
+        # Apply patches
 	cd ${KERNEL_SRC}; \
 		QUILT_PATCHES=../debian/patches  \
 		QUILT_SERIES=series.linux \
 		quilt --quiltrc /dev/null --color=always push -a || test $$? = 2
 	cd ${ZFS_SRC}; \
-    	QUILT_PATCHES=../debian/patches  \
-    	QUILT_SERIES=series.zfs \
-    	quilt --quiltrc /dev/null --color=always push -a || test $$? = 2
+        QUILT_PATCHES=../debian/patches  \
+        QUILT_SERIES=series.zfs \
+        quilt --quiltrc /dev/null --color=always push -a || test $$? = 2
+
 
 override_dh_quilt_unpatch:
 	cd ${KERNEL_SRC}; \
@@ -45,45 +48,56 @@ override_dh_quilt_unpatch:
 		QUILT_SERIES=series.linux \
 		quilt --quiltrc /dev/null pop -a || test $$? = 2
 	cd ${ZFS_SRC}; \
-    	QUILT_PATCHES=../debian/patches \
-    	QUILT_SERIES=series.zfs \
-    	quilt --quiltrc /dev/null pop -a || test $$? = 2
-	rm -rf ${KERNEL_SRC}/.pc ${ZFS_SRC}/.pc
+        QUILT_PATCHES=../debian/patches \
+        QUILT_SERIES=series.zfs \
+        quilt --quiltrc /dev/null pop -a || test $$? = 2
+	rm -rf ${KERNEL_SRC}/.pc ${ZFS_SRC}/.pc ${AUFS_SRC}/.pc
 
 override_dh_autoreconf:
 	dh_autoreconf -D ${ZFS_SRC}
 
-override_dh_auto_configure: ${KERNEL_SRC}/.config
+override_dh_auto_configure: ${KERNEL_SRC}/.config ${KERNEL_SRC}/include/uapi/linux/aufs_type.h ${KERNEL_SRC}/fs/aufs ${KERNEL_SRC}/Documentation/filesystems/aufs
 
 override_dh_auto_build:
-	# Kernel
+        # Kernel
 	dh_auto_build -D ${KERNEL_SRC} -- \
 		CC="${PVE_KERNEL_CC}" \
 		KCFLAGS="${PVE_KERNEL_CFLAGS}" \
 		EXTRAVERSION="${EXTRAVERSION}" \
 		LOCALVERSION="${LOCALVERSION}" \
 		KBUILD_BUILD_VERSION_TIMESTAMP="${KVNAME} ${PVE_BUILD_PROFILE} (${PKG_DATE})"
-	# ZFS
+        # ZFS
 	dh_auto_configure -D ${ZFS_SRC} -- CC="${PVE_ZFS_CC}" --with-config=kernel --with-linux=$(realpath ${KERNEL_SRC}) --with-linux-obj=$(realpath ${KERNEL_SRC})
 	dh_auto_build -D ${ZFS_SRC}
 
-override_dh_auto_install: debian/SOURCE .install_mark .tools_install_mark .headers_install_mark .usr_headers_install_mark
+override_dh_auto_install: debian/SOURCE .install_mark .tools_install_mark .headers_install_mark .usr_headers_install_mark .tools_aufs_install_mark
 	dh_installdocs -A debian/copyright debian/SOURCE
 	dh_installchangelogs
 	dh_installman
 	dh_strip_nondeterminism
 	dh_compress
 	dh_fixperms
+	dh_auto_install -D ${AUFS_TOOLS_SRC}
 
 override_dh_auto_clean: debian/control
 	dh_clean
 	dh_auto_clean -D ${KERNEL_SRC}
 	dh_auto_clean -D ${ZFS_SRC}
+	dh_auto_clean -D ${AUFS_TOOLS_SRC}
 	rm -f ${PVE_KERNEL_TEMPLATES} ${PVE_HEADER_TEMPLATES}
 	rm -f debian/SOURCE debian/*.tmp .*_mark
 
 ## Kernel
 PVE_KERNEL_TEMPLATES := $(patsubst debian/templates/pve-kernel.%.in, debian/${PVE_KERNEL_PKG}.%, $(wildcard debian/templates/pve-kernel.*.in))
+
+${KERNEL_SRC}/include/uapi/linux/aufs_type.h: ${AUFS_SRC}/include/uapi/linux/aufs_type.h
+	cp -a $^ $$(dirname $@)
+
+${KERNEL_SRC}/fs/aufs: ${AUFS_SRC}/fs/aufs
+	cp -a $^ $$(dirname $@)
+
+${KERNEL_SRC}/Documentation/filesystems/aufs: ${AUFS_SRC}/Documentation/filesystems/aufs
+	cp -a $^ $$(dirname $@)
 
 ${KERNEL_SRC}/.config:
 	${KERNEL_SRC}/scripts/kconfig/merge_config.sh -m \
@@ -106,7 +120,10 @@ debian/${PVE_KERNEL_PKG}.%: debian/templates/pve-kernel.%.in
 	install -m 644 ${KERNEL_SRC}/System.map debian/${PVE_KERNEL_PKG}/boot/System.map-${KVNAME}
 	install -m 644 ${KERNEL_SRC}/${KERNEL_IMAGE_PATH} debian/${PVE_KERNEL_PKG}/boot/${KERNEL_INSTALL_FILE}-${KVNAME}
 	${MAKE} -C ${KERNEL_SRC} INSTALL_MOD_PATH=${BUILD_DIR}/debian/${PVE_KERNEL_PKG}/ modules_install
-	# install zfs drivers
+        # install aufs drivers
+	install -m 644 -d ${AUFS_SRC}/fs/aufs debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/kernel/fs
+        # install AUFS TOOLS
+        # install zfs drivers
 	install -d -m 0755 debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/zfs
 	install -m 644 ${ZFS_SRC}/module/avl/zavl.ko debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/zfs
 	install -m 644 ${ZFS_SRC}/module/nvpair/znvpair.ko debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/zfs
@@ -117,13 +134,13 @@ debian/${PVE_KERNEL_PKG}.%: debian/templates/pve-kernel.%.in
 	install -m 644 ${ZFS_SRC}/module/lua/zlua.ko debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/zfs
 	install -m 644 ${ZFS_SRC}/module/spl/spl.ko debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/zfs
 	install -m 644 ${ZFS_SRC}/module/zstd/zzstd.ko debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/zfs
-	# remove firmware
+        # remove firmware
 	rm -rf debian/${PVE_KERNEL_PKG}/lib/firmware
-	# strip debug info
+        # strip debug info
 	find debian/${PVE_KERNEL_PKG}/lib/modules -name \*.ko -print | while read f ; do strip --strip-debug "$$f"; done
-	# finalize
+        # finalize
 	/sbin/depmod -b debian/${PVE_KERNEL_PKG}/ ${KVNAME}
-	# Autogenerate blacklist for watchdog devices (see README)
+        # Autogenerate blacklist for watchdog devices (see README)
 	install -m 0755 -d debian/${PVE_KERNEL_PKG}/lib/modprobe.d
 	ls debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/kernel/drivers/watchdog/ > debian/watchdog-blacklist.tmp
 	echo ipmi_watchdog.ko >> debian/watchdog-blacklist.tmp
@@ -131,6 +148,10 @@ debian/${PVE_KERNEL_PKG}.%: debian/templates/pve-kernel.%.in
 	rm -f debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/source
 	rm -f debian/${PVE_KERNEL_PKG}/lib/modules/${KVNAME}/build
 	touch $@
+
+## AUFS TOOLS
+.tools_aufs_install_mark: .install_mark .headers_install_mark .usr_headers_install_mark
+	dh_auto_build -D ${AUFS_TOOLS_SRC} -- -e CPPFLAGS="-I$(realpath ${KERNEL_SRC})/usr/include -Wno-error=format-security" all
 
 ## Kernel tools
 .tools_compile_mark:
@@ -172,7 +193,7 @@ debian/${PVE_HEADER_PKG}.%: debian/templates/pve-headers.%.in
 	( \
 		cd ${KERNEL_SRC}; \
 		find . -path './debian/*' -prune \
-               	-o -path './include/*' -prune \
+                -o -path './include/*' -prune \
                 -o -path './scripts' -prune \
                 -o -type f \
 					\( \
@@ -203,7 +224,7 @@ debian/${PVE_HEADER_PKG}.%: debian/templates/pve-headers.%.in
 	$(MAKE) -C ${KERNEL_SRC} headers_install ARCH=$(KERNEL_HEADER_ARCH) INSTALL_HDR_PATH='$(CURDIR)'/$(OUT_DIR)
 	rm -rf $(OUT_DIR)/include/drm $(OUT_DIR)/include/scsi
 	find $(OUT_DIR)/include \( -name .install -o -name ..install.cmd \) -execdir rm {} +
-	# Move include/asm to arch-specific directory
+        # Move include/asm to arch-specific directory
 	mkdir -p $(OUT_DIR)/include/$(DEB_HOST_MULTIARCH)
 	mv $(OUT_DIR)/include/asm $(OUT_DIR)/include/$(DEB_HOST_MULTIARCH)/
 	test ! -d $(OUT_DIR)/include/arch || \
